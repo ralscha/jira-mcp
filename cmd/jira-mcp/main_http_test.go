@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,8 +28,14 @@ func TestHTTPTransport_ListTools(t *testing.T) {
 	}
 	addr := "127.0.0.1:" + strconv.Itoa(port)
 
-	//nolint:gosec // addr is a local port allocated by freePort, safe for subprocess launch
-	cmd := exec.CommandContext(ctx, "go", "run", ".",
+	exe := filepath.Join(t.TempDir(), "jira-mcp.exe")
+	build := exec.CommandContext(ctx, "go", "build", "-o", exe, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	//nolint:gosec // exe is built in the test temp dir; addr is a local port allocated by freePort.
+	cmd := exec.CommandContext(ctx, exe,
 		"--jira-base-url=https://example.atlassian.net",
 		"--jira-email=user@example.com",
 		"--jira-api-token=tok",
@@ -35,10 +44,22 @@ func TestHTTPTransport_ListTools(t *testing.T) {
 		"--http-addr="+addr,
 	)
 	cmd.Env = os.Environ()
+	var logs lockedBuffer
+	cmd.Stdout = &logs
+	cmd.Stderr = &logs
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("cmd.Start() error = %v", err)
 	}
-	defer func() { _ = cmd.Process.Kill() }()
+	exitCh := make(chan error, 1)
+	go func() {
+		exitCh <- cmd.Wait()
+	}()
+	defer func() {
+		if cmd.ProcessState == nil {
+			_ = cmd.Process.Kill()
+			<-exitCh
+		}
+	}()
 
 	endpoint := "http://" + addr
 
@@ -46,12 +67,18 @@ func TestHTTPTransport_ListTools(t *testing.T) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "smoke-test", Version: "0.0.0"}, nil)
 	deadline := time.Now().Add(20 * time.Second)
 	for {
+		select {
+		case err := <-exitCh:
+			t.Fatalf("jira-mcp exited before accepting HTTP connections: %v\n%s", err, logs.String())
+		default:
+		}
+
 		session, err = client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: endpoint}, nil)
 		if err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("client.Connect() error = %v (giving up after retries)", err)
+			t.Fatalf("client.Connect() error = %v (giving up after retries)\n%s", err, logs.String())
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
@@ -86,4 +113,21 @@ func freePort() (int, error) {
 	}
 	defer func() { _ = l.Close() }()
 	return l.Addr().(*net.TCPAddr).Port, nil
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

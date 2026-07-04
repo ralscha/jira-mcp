@@ -100,8 +100,8 @@ func (c *Config) validate() error {
 		errs = append(errs, "JIRA_BASE_URL (or --jira-base-url) is required")
 	} else if u, err := url.Parse(c.JiraBaseURL); err != nil {
 		errs = append(errs, fmt.Sprintf("JIRA_BASE_URL is not a valid URL: %v", err))
-	} else if u.Scheme != "https" {
-		errs = append(errs, "JIRA_BASE_URL must use https")
+	} else if u.Scheme != "https" || u.Host == "" {
+		errs = append(errs, "JIRA_BASE_URL must be an absolute https URL")
 	}
 
 	if c.JiraEmail == "" {

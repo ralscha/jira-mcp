@@ -98,6 +98,20 @@ func TestLoad_InvalidScheme(t *testing.T) {
 	}
 }
 
+func TestLoad_InvalidBaseURL(t *testing.T) {
+	t.Setenv("JIRA_BASE_URL", "not-a-url")
+	t.Setenv("JIRA_EMAIL", "user@example.com")
+	t.Setenv("JIRA_API_TOKEN", "tok123")
+	t.Setenv("JIRA_MODE", "")
+	t.Setenv("MCP_TRANSPORT", "")
+	t.Setenv("MCP_HTTP_ADDR", "")
+
+	_, err := Load(nil)
+	if err == nil {
+		t.Fatal("Load() error = nil, want error for relative base URL")
+	}
+}
+
 func TestLoad_InvalidMode(t *testing.T) {
 	t.Setenv("JIRA_BASE_URL", "https://example.atlassian.net")
 	t.Setenv("JIRA_EMAIL", "user@example.com")
