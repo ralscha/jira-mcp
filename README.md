@@ -103,6 +103,30 @@ The server authenticates to Jira Cloud using [HTTP Basic auth](https://developer
 with your Jira account email as the username and an [API token](https://id.atlassian.com/manage-profile/security/api-tokens)
 as the password.
 
+### Required token permissions
+
+Atlassian API tokens do not grant more access than the Atlassian account has.
+Use a dedicated account with the smallest Jira project permissions needed for
+the tools you expose.
+
+You can use either:
+
+- A classic/unscoped API token with `JIRA_BASE_URL` set to your site URL, e.g.
+  `https://your-domain.atlassian.net`.
+- A scoped API token. Scoped tokens must call the Atlassian API gateway, e.g.
+  `JIRA_BASE_URL=https://api.atlassian.com/ex/jira/{cloudId}/`.
+
+For scoped tokens, grant these Jira scopes:
+
+| Mode | Token scopes | Jira permissions the account still needs |
+| ---- | ------------ | ---------------------------------------- |
+| `readonly` | `read:jira-work` | Jira product access and `Browse Projects` for the projects/issues to read. Issue security and attachment visibility rules still apply. |
+| `readwrite` | `read:jira-work`, `write:jira-work` | The readonly permissions, plus only the project permissions required by the write tools you use: `Create Issues`, `Edit Issues`, `Transition Issues`, `Add Comments`, and/or `Create Attachments`. Workflow conditions and field permissions still apply. |
+
+`jira-mcp` does not need Jira administration scopes such as `manage:jira-project`
+or `manage:jira-configuration`, and it does not need `Delete Issues` because no
+Jira delete tool is exposed.
+
 ## MCP client configuration
 
 ### Claude Desktop (stdio)
