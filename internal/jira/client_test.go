@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 )
 
@@ -50,8 +51,13 @@ func TestGetIssue(t *testing.T) {
 }
 
 func TestSearchIssues(t *testing.T) {
+	requestCount := 0
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/rest/api/3/search" {
+		requestCount++
+		if requestCount > 1 {
+			t.Fatalf("SearchIssues made more than one request")
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/rest/api/3/search/jql" {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		var body map[string]any
@@ -59,18 +65,75 @@ func TestSearchIssues(t *testing.T) {
 		if body["jql"] != "project = PROJ" {
 			t.Fatalf("unexpected jql: %v", body["jql"])
 		}
+		if body["startAt"] != nil {
+			t.Fatalf("unexpected startAt in request body: %v", body["startAt"])
+		}
+		if body["nextPageToken"] != nil {
+			t.Fatalf("unexpected nextPageToken in first request: %v", body["nextPageToken"])
+		}
+		if body["maxResults"] != float64(50) {
+			t.Fatalf("unexpected maxResults: %v", body["maxResults"])
+		}
+		fields, ok := body["fields"].([]any)
+		if !ok {
+			t.Fatalf("expected fields array, got %T", body["fields"])
+		}
+		wantFields := []string{"summary", "status", "issuetype", "project", "assignee", "reporter", "description", "created", "updated"}
+		gotFields := make([]string, len(fields))
+		for i, field := range fields {
+			gotFields[i], ok = field.(string)
+			if !ok {
+				t.Fatalf("field %d has type %T", i, field)
+			}
+		}
+		if !slices.Equal(gotFields, wantFields) {
+			t.Fatalf("unexpected fields: %v", gotFields)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"startAt": 0, "maxResults": 50, "total": 1,
-			"issues": []map[string]any{{"id": "1", "key": "PROJ-1"}},
+			"isLast":        false,
+			"nextPageToken": "page-2",
+			"issues":        []map[string]any{{"id": "1", "key": "PROJ-1"}},
 		})
 	})
 
-	result, err := c.SearchIssues(t.Context(), "project = PROJ", 0, 50, nil)
+	result, err := c.SearchIssues(t.Context(), "project = PROJ", "", 50, nil)
 	if err != nil {
 		t.Fatalf("SearchIssues() error = %v", err)
 	}
-	if result.Total != 1 || len(result.Issues) != 1 {
+	if result.IsLast || result.NextPageToken != "page-2" || len(result.Issues) != 1 {
 		t.Errorf("SearchIssues() = %+v", result)
+	}
+}
+
+func TestSearchIssues_UsesNextPageToken(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/rest/api/3/search/jql" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["maxResults"] != float64(2) {
+			t.Fatalf("unexpected maxResults: %v", body["maxResults"])
+		}
+		if body["nextPageToken"] != "page-2" {
+			t.Fatalf("unexpected nextPageToken: %v", body["nextPageToken"])
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"isLast": true,
+			"issues": []map[string]any{
+				{"id": "3", "key": "PROJ-3"},
+				{"id": "4", "key": "PROJ-4"},
+			},
+		})
+	})
+
+	result, err := c.SearchIssues(t.Context(), "project = PROJ", "page-2", 2, []string{"summary"})
+	if err != nil {
+		t.Fatalf("SearchIssues() error = %v", err)
+	}
+	if !result.IsLast || result.NextPageToken != "" || len(result.Issues) != 2 || result.Issues[0].Key != "PROJ-3" || result.Issues[1].Key != "PROJ-4" {
+		t.Fatalf("unexpected issues: %+v", result.Issues)
 	}
 }
 

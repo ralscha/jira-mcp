@@ -49,12 +49,12 @@ type Issue struct {
 	Fields IssueFields `json:"fields"`
 }
 
-// SearchResult is the response body of POST /rest/api/3/search.
+// SearchResult is one token-paginated page returned by Jira's enhanced issue
+// search API.
 type SearchResult struct {
-	StartAt    int     `json:"startAt"`
-	MaxResults int     `json:"maxResults"`
-	Total      int     `json:"total"`
-	Issues     []Issue `json:"issues"`
+	IsLast        bool    `json:"isLast"`
+	NextPageToken string  `json:"nextPageToken,omitempty"`
+	Issues        []Issue `json:"issues"`
 }
 
 // Project is a Jira project as returned by the project endpoints.

@@ -7,6 +7,25 @@ import (
 	"strings"
 )
 
+var defaultSearchFields = []string{
+	"summary",
+	"status",
+	"issuetype",
+	"project",
+	"assignee",
+	"reporter",
+	"description",
+	"created",
+	"updated",
+}
+
+type searchRequest struct {
+	JQL           string   `json:"jql"`
+	Fields        []string `json:"fields,omitempty"`
+	MaxResults    int      `json:"maxResults,omitempty"`
+	NextPageToken string   `json:"nextPageToken,omitempty"`
+}
+
 // GetIssue fetches a single issue by key or id. If fields is non-empty, only
 // those fields are requested; otherwise Jira's default field set is used.
 func (c *Client) GetIssue(ctx context.Context, keyOrID string, fields []string) (*Issue, error) {
@@ -21,18 +40,28 @@ func (c *Client) GetIssue(ctx context.Context, keyOrID string, fields []string) 
 	return &issue, nil
 }
 
-// SearchIssues runs a JQL search, returning a page of matching issues.
-func (c *Client) SearchIssues(ctx context.Context, jql string, startAt, maxResults int, fields []string) (*SearchResult, error) {
-	body := map[string]any{
-		"jql":        jql,
-		"startAt":    startAt,
-		"maxResults": maxResults,
+// SearchIssues runs a JQL search, returning one token-paginated page of
+// matching issues. Pass the previous result's NextPageToken to fetch the next
+// page, or an empty string to start a new search.
+func (c *Client) SearchIssues(ctx context.Context, jql, nextPageToken string, maxResults int, fields []string) (*SearchResult, error) {
+	if maxResults <= 0 {
+		maxResults = 50
 	}
-	if len(fields) > 0 {
-		body["fields"] = fields
+
+	effectiveFields := fields
+	if len(effectiveFields) == 0 {
+		effectiveFields = append([]string(nil), defaultSearchFields...)
 	}
+
+	body := searchRequest{
+		JQL:           jql,
+		Fields:        effectiveFields,
+		MaxResults:    maxResults,
+		NextPageToken: nextPageToken,
+	}
+
 	var result SearchResult
-	if err := c.doJSON(ctx, "POST", "rest/api/3/search", nil, body, &result); err != nil {
+	if err := c.doJSON(ctx, "POST", "rest/api/3/search/jql", nil, body, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

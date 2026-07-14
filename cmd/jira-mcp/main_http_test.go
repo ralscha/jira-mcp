@@ -29,6 +29,7 @@ func TestHTTPTransport_ListTools(t *testing.T) {
 	addr := "127.0.0.1:" + strconv.Itoa(port)
 
 	exe := filepath.Join(t.TempDir(), "jira-mcp.exe")
+	//nolint:gosec // The executable and arguments are fixed test inputs; only the output path is generated.
 	build := exec.CommandContext(ctx, "go", "build", "-o", exe, ".")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build failed: %v\n%s", err, string(out))

@@ -73,18 +73,17 @@ func getIssue(client *jira.Client) mcp.ToolHandlerFor[GetIssueInput, IssueSummar
 
 // SearchIssuesInput is the input for the jira_search_issues tool.
 type SearchIssuesInput struct {
-	JQL        string   `json:"jql" jsonschema:"a JQL (Jira Query Language) query string, e.g. 'project = PROJ AND status = \"To Do\"'"`
-	StartAt    int      `json:"start_at,omitempty" jsonschema:"pagination offset, defaults to 0"`
-	MaxResults int      `json:"max_results,omitempty" jsonschema:"maximum number of results to return, defaults to 50"`
-	Fields     []string `json:"fields,omitempty" jsonschema:"optional list of Jira field names to fetch per issue"`
+	JQL           string   `json:"jql" jsonschema:"a JQL (Jira Query Language) query string, e.g. 'project = PROJ AND status = \"To Do\"'"`
+	NextPageToken string   `json:"next_page_token,omitempty" jsonschema:"token returned by the previous page; omit for the first page"`
+	MaxResults    int      `json:"max_results,omitempty" jsonschema:"maximum number of results to return, defaults to 50"`
+	Fields        []string `json:"fields,omitempty" jsonschema:"optional list of Jira field names to fetch per issue"`
 }
 
 // SearchIssuesOutput is the output for the jira_search_issues tool.
 type SearchIssuesOutput struct {
-	Total      int            `json:"total" jsonschema:"total number of matching issues"`
-	StartAt    int            `json:"start_at" jsonschema:"pagination offset of this page"`
-	MaxResults int            `json:"max_results" jsonschema:"maximum results requested for this page"`
-	Issues     []IssueSummary `json:"issues" jsonschema:"the matching issues in this page"`
+	IsLast        bool           `json:"is_last" jsonschema:"whether this is the final page"`
+	NextPageToken string         `json:"next_page_token,omitempty" jsonschema:"token to pass to the next search call"`
+	Issues        []IssueSummary `json:"issues" jsonschema:"the matching issues in this page"`
 }
 
 func searchIssues(client *jira.Client) mcp.ToolHandlerFor[SearchIssuesInput, SearchIssuesOutput] {
@@ -93,15 +92,14 @@ func searchIssues(client *jira.Client) mcp.ToolHandlerFor[SearchIssuesInput, Sea
 		if maxResults <= 0 {
 			maxResults = 50
 		}
-		result, err := client.SearchIssues(ctx, in.JQL, in.StartAt, maxResults, in.Fields)
+		result, err := client.SearchIssues(ctx, in.JQL, in.NextPageToken, maxResults, in.Fields)
 		if err != nil {
 			return nil, SearchIssuesOutput{}, fmt.Errorf("search issues: %w", err)
 		}
 		out := SearchIssuesOutput{
-			Total:      result.Total,
-			StartAt:    result.StartAt,
-			MaxResults: result.MaxResults,
-			Issues:     make([]IssueSummary, len(result.Issues)),
+			IsLast:        result.IsLast,
+			NextPageToken: result.NextPageToken,
+			Issues:        make([]IssueSummary, len(result.Issues)),
 		}
 		for i := range result.Issues {
 			out.Issues[i] = issueToSummary(&result.Issues[i])
