@@ -78,7 +78,7 @@ func TestSearchIssues(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected fields array, got %T", body["fields"])
 		}
-		wantFields := []string{"summary", "status", "issuetype", "project", "assignee", "reporter", "description", "created", "updated"}
+		wantFields := []string{"summary", "status", "issuetype", "project", "assignee", "reporter", "description", "priority", "resolution", "labels", "parent", "duedate", "created", "updated"}
 		gotFields := make([]string, len(fields))
 		for i, field := range fields {
 			gotFields[i], ok = field.(string)
@@ -223,7 +223,7 @@ func TestGetTransitionsAndDoTransition(t *testing.T) {
 		t.Fatalf("GetTransitions() = %+v", transitions)
 	}
 
-	if err := c.DoTransition(t.Context(), "PROJ-1", "11"); err != nil {
+	if err := c.DoTransition(t.Context(), "PROJ-1", TransitionInput{TransitionID: "11"}); err != nil {
 		t.Fatalf("DoTransition() error = %v", err)
 	}
 }
@@ -259,7 +259,7 @@ func TestListProjectsAndGetProject(t *testing.T) {
 		}
 	})
 
-	projects, err := c.ListProjects(t.Context(), 0, 50)
+	projects, err := c.ListProjects(t.Context(), ProjectSearchOptions{MaxResults: 50})
 	if err != nil {
 		t.Fatalf("ListProjects() error = %v", err)
 	}

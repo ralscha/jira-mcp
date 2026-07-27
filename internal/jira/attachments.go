@@ -3,6 +3,7 @@ package jira
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/url"
 )
 
@@ -16,14 +17,19 @@ type DownloadedAttachment struct {
 }
 
 // DownloadAttachment fetches an attachment's metadata and content by id,
-// returning the content base64-encoded.
+// returning the content base64-encoded. Attachments larger than
+// MaxAttachmentBytes are rejected.
 func (c *Client) DownloadAttachment(ctx context.Context, id string) (*DownloadedAttachment, error) {
 	var meta Attachment
 	if err := c.doJSON(ctx, "GET", "rest/api/3/attachment/"+url.PathEscape(id), nil, nil, &meta); err != nil {
 		return nil, err
 	}
 
-	data, contentType, err := c.doRaw(ctx, meta.Content)
+	if meta.Size > MaxAttachmentBytes {
+		return nil, fmt.Errorf("%w: attachment %s is %d bytes, limit is %d", ErrTooLarge, id, meta.Size, int64(MaxAttachmentBytes))
+	}
+
+	data, contentType, err := c.doRaw(ctx, meta.Content, MaxAttachmentBytes)
 	if err != nil {
 		return nil, err
 	}

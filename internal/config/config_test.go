@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -123,5 +124,42 @@ func TestLoad_InvalidMode(t *testing.T) {
 	_, err := Load(nil)
 	if err == nil {
 		t.Fatal("Load() error = nil, want error for invalid mode")
+	}
+}
+
+func TestLoad_AuthTokenFromEnvAndFlag(t *testing.T) {
+	t.Setenv("JIRA_BASE_URL", "https://example.atlassian.net")
+	t.Setenv("JIRA_EMAIL", "user@example.com")
+	t.Setenv("JIRA_API_TOKEN", "tok123")
+	t.Setenv("JIRA_MODE", "")
+	t.Setenv("MCP_TRANSPORT", "")
+	t.Setenv("MCP_HTTP_ADDR", "")
+	t.Setenv("MCP_AUTH_TOKEN", "from-env")
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.AuthToken != "from-env" {
+		t.Errorf("AuthToken = %q, want from-env", cfg.AuthToken)
+	}
+
+	cfg, err = Load([]string{"--auth-token=from-flag"})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.AuthToken != "from-flag" {
+		t.Errorf("AuthToken = %q, want from-flag", cfg.AuthToken)
+	}
+}
+
+func TestLoad_VersionShortCircuitsValidation(t *testing.T) {
+	t.Setenv("JIRA_BASE_URL", "")
+	t.Setenv("JIRA_EMAIL", "")
+	t.Setenv("JIRA_API_TOKEN", "")
+
+	_, err := Load([]string{"--version"})
+	if !errors.Is(err, ErrVersionRequested) {
+		t.Fatalf("Load() error = %v, want ErrVersionRequested", err)
 	}
 }

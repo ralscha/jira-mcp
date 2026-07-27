@@ -5,11 +5,14 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,6 +31,10 @@ func main() {
 
 func run() error {
 	cfg, err := config.Load(os.Args[1:])
+	if errors.Is(err, config.ErrVersionRequested) {
+		fmt.Println("jira-mcp " + mcpserver.ServerVersion())
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -55,9 +62,15 @@ func run() error {
 }
 
 func runHTTP(ctx context.Context, cfg *config.Config, server *mcp.Server) error {
-	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+	var handler http.Handler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 		return server
 	}, nil)
+
+	if cfg.AuthToken != "" {
+		handler = requireBearerToken(cfg.AuthToken, handler)
+	} else if cfg.IsReadWrite() {
+		log.Print("jira-mcp: warning: HTTP transport in readwrite mode without --auth-token; anyone who can reach this address can modify Jira issues")
+	}
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -83,4 +96,19 @@ func runHTTP(ctx context.Context, cfg *config.Config, server *mcp.Server) error 
 		defer cancel()
 		return httpServer.Shutdown(shutdownCtx)
 	}
+}
+
+// requireBearerToken rejects requests that do not present the configured
+// token in an "Authorization: Bearer <token>" header.
+func requireBearerToken(token string, next http.Handler) http.Handler {
+	want := []byte(token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !ok || subtle.ConstantTimeCompare([]byte(got), want) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="jira-mcp"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

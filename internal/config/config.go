@@ -3,12 +3,18 @@
 package config
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"net/url"
 	"os"
 	"strings"
 )
+
+// ErrVersionRequested is returned by Load when --version was passed, so the
+// caller can print the version and exit without validating the rest of the
+// configuration.
+var ErrVersionRequested = errors.New("version requested")
 
 // Mode controls whether write tools are registered on the MCP server.
 type Mode string
@@ -35,6 +41,9 @@ type Config struct {
 	Mode      Mode
 	Transport Transport
 	HTTPAddr  string
+	// AuthToken, when set, is the bearer token that HTTP clients must send
+	// in the Authorization header. It is ignored by the stdio transport.
+	AuthToken string
 }
 
 // Load builds a Config from environment variables, then applies overrides
@@ -47,11 +56,13 @@ type Config struct {
 //   - JIRA_MODE (readonly|readwrite)
 //   - MCP_TRANSPORT (stdio|http)
 //   - MCP_HTTP_ADDR
+//   - MCP_AUTH_TOKEN
 func Load(args []string) (*Config, error) {
 	cfg := &Config{
 		JiraBaseURL:  os.Getenv("JIRA_BASE_URL"),
 		JiraEmail:    os.Getenv("JIRA_EMAIL"),
 		JiraAPIToken: os.Getenv("JIRA_API_TOKEN"),
+		AuthToken:    os.Getenv("MCP_AUTH_TOKEN"),
 		Mode:         ModeReadOnly,
 		Transport:    TransportStdio,
 		HTTPAddr:     ":8080",
@@ -74,9 +85,15 @@ func Load(args []string) (*Config, error) {
 	mode := fs.String("mode", string(cfg.Mode), "Server mode: readonly or readwrite")
 	transport := fs.String("transport", string(cfg.Transport), "Transport: stdio or http")
 	httpAddr := fs.String("http-addr", cfg.HTTPAddr, "Address to listen on when --transport=http")
+	authToken := fs.String("auth-token", cfg.AuthToken, "Bearer token required from HTTP clients when --transport=http")
+	showVersion := fs.Bool("version", false, "Print the jira-mcp version and exit")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
+	}
+
+	if *showVersion {
+		return nil, ErrVersionRequested
 	}
 
 	cfg.JiraBaseURL = *baseURL
@@ -85,6 +102,7 @@ func Load(args []string) (*Config, error) {
 	cfg.Mode = Mode(*mode)
 	cfg.Transport = Transport(*transport)
 	cfg.HTTPAddr = *httpAddr
+	cfg.AuthToken = *authToken
 
 	if err := cfg.validate(); err != nil {
 		return nil, err

@@ -26,9 +26,49 @@ type ProjectRef struct {
 	Name string `json:"name,omitempty"`
 }
 
+// NamedRef is a generic id/name reference, used for priority, resolution,
+// components and versions.
+type NamedRef struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
+// IssueRefFields is the small field subset Jira embeds in parent, subtask
+// and issue link references.
+type IssueRefFields struct {
+	Summary   string        `json:"summary,omitempty"`
+	Status    *StatusRef    `json:"status,omitempty"`
+	IssueType *IssueTypeRef `json:"issuetype,omitempty"`
+}
+
+// IssueRef is a lightweight reference to another issue.
+type IssueRef struct {
+	ID     string          `json:"id,omitempty"`
+	Key    string          `json:"key,omitempty"`
+	Fields *IssueRefFields `json:"fields,omitempty"`
+}
+
+// IssueLinkType describes the semantics of an issue link, e.g. name
+// "Blocks" with inward "is blocked by" and outward "blocks".
+type IssueLinkType struct {
+	ID      string `json:"id,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Inward  string `json:"inward,omitempty"`
+	Outward string `json:"outward,omitempty"`
+}
+
+// IssueLink is a link between two issues. Exactly one of InwardIssue and
+// OutwardIssue is set on links returned as part of an issue's fields.
+type IssueLink struct {
+	ID           string         `json:"id,omitempty"`
+	Type         *IssueLinkType `json:"type,omitempty"`
+	InwardIssue  *IssueRef      `json:"inwardIssue,omitempty"`
+	OutwardIssue *IssueRef      `json:"outwardIssue,omitempty"`
+}
+
 // IssueFields holds the subset of Jira issue fields used by jira-mcp.
 // Description is an Atlassian Document Format (ADF) value; use
-// adfToPlainText/plainTextToADF to convert to/from plain strings.
+// adfToMarkdown/markdownToADF to convert to/from plain strings.
 type IssueFields struct {
 	Summary     string        `json:"summary,omitempty"`
 	Description any           `json:"description,omitempty"`
@@ -37,6 +77,16 @@ type IssueFields struct {
 	Project     *ProjectRef   `json:"project,omitempty"`
 	Assignee    *User         `json:"assignee,omitempty"`
 	Reporter    *User         `json:"reporter,omitempty"`
+	Priority    *NamedRef     `json:"priority,omitempty"`
+	Resolution  *NamedRef     `json:"resolution,omitempty"`
+	Labels      []string      `json:"labels,omitempty"`
+	Components  []NamedRef    `json:"components,omitempty"`
+	FixVersions []NamedRef    `json:"fixVersions,omitempty"`
+	Parent      *IssueRef     `json:"parent,omitempty"`
+	Subtasks    []IssueRef    `json:"subtasks,omitempty"`
+	IssueLinks  []IssueLink   `json:"issuelinks,omitempty"`
+	Attachments []Attachment  `json:"attachment,omitempty"`
+	DueDate     string        `json:"duedate,omitempty"`
 	Created     string        `json:"created,omitempty"`
 	Updated     string        `json:"updated,omitempty"`
 }
@@ -95,12 +145,23 @@ type Comment struct {
 	Updated string `json:"updated,omitempty"`
 }
 
+// CommentsResult is one page of the response body of
+// GET /rest/api/3/issue/{key}/comment.
+type CommentsResult struct {
+	StartAt    int       `json:"startAt"`
+	MaxResults int       `json:"maxResults"`
+	Total      int       `json:"total"`
+	Comments   []Comment `json:"comments"`
+}
+
 // Attachment is Jira attachment metadata as returned by the attachment
-// endpoints.
+// endpoints and by an issue's "attachment" field.
 type Attachment struct {
 	ID       string `json:"id"`
 	Filename string `json:"filename"`
 	MimeType string `json:"mimeType"`
 	Size     int64  `json:"size"`
 	Content  string `json:"content"`
+	Created  string `json:"created,omitempty"`
+	Author   *User  `json:"author,omitempty"`
 }

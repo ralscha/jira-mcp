@@ -2,39 +2,118 @@ package jira
 
 import "testing"
 
-func TestPlainTextToADF_SingleLine(t *testing.T) {
-	doc := plainTextToADF("hello world")
+func TestMarkdownToADF_SingleParagraph(t *testing.T) {
+	doc := markdownToADF("hello world")
 	content, ok := doc["content"].([]any)
 	if !ok || len(content) != 1 {
-		t.Fatalf("expected 1 paragraph, got %#v", doc["content"])
+		t.Fatalf("expected 1 block, got %#v", doc["content"])
+	}
+	if para, ok := content[0].(map[string]any); !ok || para["type"] != "paragraph" {
+		t.Fatalf("expected a paragraph, got %#v", content[0])
 	}
 }
 
-func TestPlainTextToADF_MultiLine(t *testing.T) {
-	doc := plainTextToADF("line one\n\nline two")
+func TestMarkdownToADF_BlankLineSeparatesParagraphs(t *testing.T) {
+	doc := markdownToADF("line one\n\nline two")
 	content, ok := doc["content"].([]any)
-	if !ok || len(content) != 3 {
-		t.Fatalf("expected 3 paragraphs, got %#v", doc["content"])
+	if !ok || len(content) != 2 {
+		t.Fatalf("expected 2 paragraphs, got %#v", doc["content"])
+	}
+}
+
+func TestMarkdownToADF_Empty(t *testing.T) {
+	doc := markdownToADF("")
+	content, ok := doc["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("expected 1 empty paragraph, got %#v", doc["content"])
 	}
 }
 
 func TestADFRoundTrip(t *testing.T) {
-	original := "first line\nsecond line"
-	doc := plainTextToADF(original)
+	tests := []struct {
+		name string
+		text string
+	}{
+		{name: "soft line breaks", text: "first line\nsecond line"},
+		{name: "paragraphs", text: "first paragraph\n\nsecond paragraph"},
+		{name: "heading", text: "# Title\n\nbody text"},
+		{name: "bullet list", text: "- one\n- two\n- three"},
+		{name: "ordered list", text: "1. one\n2. two"},
+		{name: "code block", text: "```go\nfmt.Println(\"hi\")\n```"},
+		{name: "inline marks", text: "some **bold**, some *italic* and `code`"},
+		{name: "link", text: "see [the docs](https://example.com/docs) for more"},
+		{name: "blockquote", text: "> quoted line"},
+		{name: "rule", text: "before\n\n---\n\nafter"},
+		{name: "mixed", text: "# Steps\n\n1. install\n2. run\n\nDone."},
+	}
 
-	// Simulate JSON round-trip: the real client decodes JSON responses into
-	// map[string]any/[]any, so re-marshal/unmarshal-free construction here
-	// matches what json.Unmarshal into `any` would produce, except for the
-	// []any vs []interface{} distinction which is identical in Go.
-	got := adfToPlainText(doc)
-	want := "first line\nsecond line"
-	if got != want {
-		t.Errorf("adfToPlainText() = %q, want %q", got, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := adfToMarkdown(markdownToADF(tt.text)); got != tt.text {
+				t.Errorf("round trip = %q, want %q", got, tt.text)
+			}
+		})
 	}
 }
 
-func TestAdfToPlainText_Nil(t *testing.T) {
-	if got := adfToPlainText(nil); got != "" {
-		t.Errorf("adfToPlainText(nil) = %q, want empty", got)
+func TestMarkdownToADF_RejectsUnsafeLinkScheme(t *testing.T) {
+	doc := markdownToADF("[click](javascript:alert(1))")
+	got := adfToMarkdown(doc)
+	if got != "[click](javascript:alert(1))" {
+		t.Errorf("adfToMarkdown() = %q, want the literal text", got)
+	}
+
+	content, _ := doc["content"].([]any)
+	para, _ := content[0].(map[string]any)
+	nodes, _ := para["content"].([]any)
+	for _, node := range nodes {
+		if m, ok := node.(map[string]any); ok {
+			if _, hasMarks := m["marks"]; hasMarks {
+				t.Fatalf("unsafe link should not produce a link mark: %#v", m)
+			}
+		}
+	}
+}
+
+func TestAdfToMarkdown_Nil(t *testing.T) {
+	if got := adfToMarkdown(nil); got != "" {
+		t.Errorf("adfToMarkdown(nil) = %q, want empty", got)
+	}
+}
+
+func TestAdfToMarkdown_RichNodes(t *testing.T) {
+	doc := map[string]any{
+		"type":    "doc",
+		"version": float64(1),
+		"content": []any{
+			map[string]any{
+				"type": "paragraph",
+				"content": []any{
+					map[string]any{"type": "mention", "attrs": map[string]any{"text": "@Ada"}},
+					map[string]any{"type": "text", "text": " please review"},
+				},
+			},
+			map[string]any{
+				"type": "table",
+				"content": []any{
+					map[string]any{
+						"type": "tableRow",
+						"content": []any{
+							map[string]any{"type": "tableCell", "content": []any{
+								map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": "a"}}},
+							}},
+							map[string]any{"type": "tableCell", "content": []any{
+								map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": "b"}}},
+							}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	want := "@Ada please review\n\na | b"
+	if got := adfToMarkdown(doc); got != want {
+		t.Errorf("adfToMarkdown() = %q, want %q", got, want)
 	}
 }

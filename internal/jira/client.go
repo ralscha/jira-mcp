@@ -6,14 +6,37 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 )
+
+const (
+	// MaxAttachmentBytes caps how much attachment data is read from or sent
+	// to Jira in a single call, so a large attachment cannot exhaust memory
+	// or overflow the MCP client's context.
+	MaxAttachmentBytes = 25 << 20 // 25 MiB
+
+	// maxJSONResponseBytes caps how large a JSON response body may be.
+	maxJSONResponseBytes = 16 << 20 // 16 MiB
+
+	// maxRetries is the number of additional attempts made after a
+	// retryable response (429 or a transient 5xx).
+	maxRetries = 3
+
+	// maxRetryDelay caps how long a single Retry-After hint is honoured.
+	maxRetryDelay = 30 * time.Second
+)
+
+// ErrTooLarge reports that a payload exceeded the configured size limit.
+var ErrTooLarge = errors.New("jira: payload exceeds size limit")
 
 // Client is a Jira Cloud REST API v3 client authenticated via Basic auth
 // using an account email and API token.
@@ -62,6 +85,82 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("jira: request failed with status %d: %s", e.StatusCode, strings.Join(parts, "; "))
 }
 
+// do sends req, retrying transient failures, and returns the response
+// together with its body read up to maxBytes.
+func (c *Client) do(req *http.Request, maxBytes int64) (*http.Response, []byte, error) {
+	for attempt := 0; ; attempt++ {
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, nil, fmt.Errorf("jira: request failed: %w", err)
+		}
+
+		body, readErr := readLimited(resp.Body, maxBytes)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, nil, readErr
+		}
+
+		if attempt >= maxRetries || !isRetryable(resp.StatusCode) {
+			return resp, body, nil
+		}
+
+		select {
+		case <-req.Context().Done():
+			return nil, nil, fmt.Errorf("jira: request failed: %w", req.Context().Err())
+		case <-time.After(retryDelay(resp, attempt)):
+		}
+
+		if req.GetBody != nil {
+			rewound, err := req.GetBody()
+			if err != nil {
+				return nil, nil, fmt.Errorf("jira: rewinding request body for retry: %w", err)
+			}
+			req.Body = rewound
+		}
+	}
+}
+
+// isRetryable reports whether a status code is worth retrying: Jira's rate
+// limit response and transient gateway errors.
+func isRetryable(statusCode int) bool {
+	switch statusCode {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// retryDelay honours a Retry-After header when present, and otherwise backs
+// off exponentially.
+func retryDelay(resp *http.Response, attempt int) time.Duration {
+	if v := resp.Header.Get("Retry-After"); v != "" {
+		if seconds, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && seconds >= 0 {
+			return min(time.Duration(seconds)*time.Second, maxRetryDelay)
+		}
+		if at, err := http.ParseTime(v); err == nil {
+			if d := time.Until(at); d > 0 {
+				return min(d, maxRetryDelay)
+			}
+			return 0
+		}
+	}
+	return min(500*time.Millisecond<<attempt, maxRetryDelay)
+}
+
+// readLimited reads up to maxBytes from r, returning ErrTooLarge if more
+// data is available.
+func readLimited(r io.Reader, maxBytes int64) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("jira: reading response body: %w", err)
+	}
+	if int64(len(body)) > maxBytes {
+		return nil, fmt.Errorf("%w: response larger than %d bytes", ErrTooLarge, maxBytes)
+	}
+	return body, nil
+}
+
 // doJSON sends a request with an optional JSON-encoded body and decodes a
 // JSON response into out (if non-nil). path is resolved relative to the
 // client's base URL.
@@ -84,15 +183,9 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, respBody, err := c.do(req, maxJSONResponseBytes)
 	if err != nil {
-		return fmt.Errorf("jira: request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("jira: reading response body: %w", err)
+		return err
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -109,22 +202,16 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 
 // doRaw sends a GET request and returns the raw response body along with
 // its Content-Type header. It is used for non-JSON payloads such as
-// attachment content.
-func (c *Client) doRaw(ctx context.Context, path string) ([]byte, string, error) {
+// attachment content, and refuses bodies larger than maxBytes.
+func (c *Client) doRaw(ctx context.Context, path string, maxBytes int64) ([]byte, string, error) {
 	req, err := c.newRequest(ctx, "GET", path, nil, nil)
 	if err != nil {
 		return nil, "", err
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, respBody, err := c.do(req, maxBytes)
 	if err != nil {
-		return nil, "", fmt.Errorf("jira: request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, "", fmt.Errorf("jira: reading response body: %w", err)
+		return nil, "", err
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -137,6 +224,10 @@ func (c *Client) doRaw(ctx context.Context, path string) ([]byte, string, error)
 // doMultipart sends a multipart/form-data POST request with a single file
 // part named "file", decoding a JSON array response into out.
 func (c *Client) doMultipart(ctx context.Context, path, filename, mimeType string, data []byte, out any) error {
+	if int64(len(data)) > MaxAttachmentBytes {
+		return fmt.Errorf("%w: attachment is %d bytes, limit is %d", ErrTooLarge, len(data), int64(MaxAttachmentBytes))
+	}
+
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
@@ -156,7 +247,7 @@ func (c *Client) doMultipart(ctx context.Context, path, filename, mimeType strin
 		return fmt.Errorf("jira: closing multipart writer: %w", err)
 	}
 
-	req, err := c.newRequest(ctx, "POST", path, nil, &buf)
+	req, err := c.newRequest(ctx, "POST", path, nil, bytes.NewReader(buf.Bytes()))
 	if err != nil {
 		return err
 	}
@@ -165,15 +256,9 @@ func (c *Client) doMultipart(ctx context.Context, path, filename, mimeType strin
 	// Required by Jira for attachment uploads to bypass XSRF checks.
 	req.Header.Set("X-Atlassian-Token", "no-check")
 
-	resp, err := c.httpClient.Do(req)
+	resp, respBody, err := c.do(req, maxJSONResponseBytes)
 	if err != nil {
-		return fmt.Errorf("jira: request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("jira: reading response body: %w", err)
+		return err
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

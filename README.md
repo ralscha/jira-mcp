@@ -40,6 +40,9 @@ Flags take precedence over environment variables.
 | `JIRA_MODE`          | `--mode`           | `readonly`   | `readonly` or `readwrite`                            |
 | `MCP_TRANSPORT`      | `--transport`      | `stdio`      | `stdio` or `http`                                    |
 | `MCP_HTTP_ADDR`      | `--http-addr`      | `:8080`      | Listen address when `--transport=http`               |
+| `MCP_AUTH_TOKEN`     | `--auth-token`     | *(empty)*    | Bearer token HTTP clients must present; ignored by the stdio transport |
+
+Run `jira-mcp --version` to print the build version.
 
 ## Tools
 
@@ -49,29 +52,61 @@ Flags take precedence over environment variables.
 | --------------------------- | ---------------------------------------------------------- |
 | `jira_get_issue`            | Get a single Jira issue by key or id                       |
 | `jira_search_issues`        | Search Jira issues with JQL, with pagination               |
-| `jira_list_projects`        | List Jira projects visible to the authenticated user       |
-| `jira_get_project`          | Get a single Jira project by key or id                     |
+| `jira_get_comments`         | List an issue's comments, with pagination                  |
+| `jira_get_worklogs`         | List an issue's work log entries                           |
 | `jira_get_transitions`      | List available workflow transitions for an issue           |
+| `jira_list_projects`        | List Jira projects, filterable by name/key and type        |
+| `jira_get_project`          | Get a single Jira project by key or id                     |
+| `jira_list_issue_types`     | List the issue types creatable in a project                |
+| `jira_get_create_fields`    | List create-screen fields for a project and issue type     |
+| `jira_list_fields`          | List field definitions, to map names to (custom) field ids |
+| `jira_list_link_types`      | List the issue link types configured on the site           |
+| `jira_get_myself`           | Get the account this server authenticates as               |
+| `jira_search_users`         | Find users by display name or email, to get account ids    |
 | `jira_download_attachment`  | Download a Jira attachment's content (base64-encoded)      |
+
+Attachment ids come from the `attachments` list returned by `jira_get_issue`.
 
 ### Write tools (only in `readwrite` mode)
 
 | Tool                     | Description                                    |
 | ------------------------ | ---------------------------------------------- |
 | `jira_create_issue`      | Create a new Jira issue                        |
-| `jira_update_issue`      | Update summary and/or description of an issue  |
-| `jira_transition_issue`  | Execute a workflow transition on an issue      |
-| `jira_add_comment`       | Add a plain-text comment to an issue           |
+| `jira_update_issue`      | Update summary, description, assignee, priority, labels, components, due date or raw fields |
+| `jira_assign_issue`      | Assign or unassign an issue                    |
+| `jira_transition_issue`  | Execute a workflow transition, optionally setting a resolution and comment |
+| `jira_add_comment`       | Add a comment to an issue                      |
+| `jira_link_issues`       | Link two issues, e.g. "blocks" or "duplicates"  |
+| `jira_add_worklog`       | Log work spent on an issue                     |
 | `jira_upload_attachment` | Upload a file attachment to an issue           |
 
 The default mode is `readonly`. Set `JIRA_MODE=readwrite` (or
 `--mode=readwrite`) explicitly to enable write tools.
 
+### Custom fields
+
+`jira_create_issue`, `jira_update_issue` and `jira_transition_issue` accept a
+`fields` object of raw Jira field values keyed by field id, for anything not
+covered by a dedicated argument. Use `jira_list_fields` or
+`jira_get_create_fields` to discover ids such as `customfield_10011`.
+
+### Rich text
+
 Issue descriptions and comment bodies use [Atlassian Document Format (ADF)](https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/).
-The server automatically converts plain text to/from a minimal ADF paragraph
-document, so you can work with plain strings without handling ADF directly.
-Rich formatting (tables, mentions, etc.) is not preserved through these
-conversions.
+The server converts between ADF and Markdown, so tools accept and return
+Markdown strings. Headings, paragraphs, bullet and ordered lists, fenced code
+blocks, block quotes, horizontal rules and the inline marks `` `code` ``,
+`**strong**`, `*emphasis*` and `[links](https://example.com)` are supported.
+Plain text is valid Markdown, so unformatted input passes through unchanged.
+Other ADF constructs (tables, mentions, media) are rendered as best-effort
+text when reading and are not produced when writing. Only `http`, `https` and
+`mailto` links are converted; other link schemes stay literal text.
+
+### Limits and rate limiting
+
+Attachment uploads and downloads are capped at 25 MiB. Requests that Jira
+rejects with `429 Too Many Requests`, or that fail with a transient gateway
+error, are retried up to three times, honouring the `Retry-After` header.
 
 ## Transports
 
@@ -93,9 +128,12 @@ endpoint on the configured address.
 jira-mcp --transport=http --http-addr=:8080
 ```
 
-The HTTP transport has **no built-in authentication**. When running in
-`readwrite` mode, secure it at the network or deployment layer (reverse proxy,
+Set `MCP_AUTH_TOKEN` (or `--auth-token`) to require clients to send
+`Authorization: Bearer <token>`; requests without a matching token get a
+`401`. Without it the endpoint has **no authentication**, so in `readwrite`
+mode you must secure it at the network or deployment layer (reverse proxy,
 firewall, loopback-only binding) to prevent unauthorized issue modifications.
+The server logs a warning at startup in that configuration.
 
 ## Authentication
 
@@ -121,7 +159,7 @@ For scoped tokens, grant these Jira scopes:
 | Mode | Token scopes | Jira permissions the account still needs |
 | ---- | ------------ | ---------------------------------------- |
 | `readonly` | `read:jira-work` | Jira product access and `Browse Projects` for the projects/issues to read. Issue security and attachment visibility rules still apply. |
-| `readwrite` | `read:jira-work`, `write:jira-work` | The readonly permissions, plus only the project permissions required by the write tools you use: `Create Issues`, `Edit Issues`, `Transition Issues`, `Add Comments`, and/or `Create Attachments`. Workflow conditions and field permissions still apply. |
+| `readwrite` | `read:jira-work`, `write:jira-work` | The readonly permissions, plus only the project permissions required by the write tools you use: `Create Issues`, `Edit Issues`, `Assign Issues`, `Transition Issues`, `Add Comments`, `Link Issues`, `Work On Issues`, and/or `Create Attachments`. Workflow conditions and field permissions still apply. |
 
 `jira-mcp` does not need Jira administration scopes such as `manage:jira-project`
 or `manage:jira-configuration`, and it does not need `Delete Issues` because no
@@ -191,8 +229,11 @@ Tests cover:
 
 - Config loading, validation, and flag/env precedence
 - Jira REST API client against `httptest.Server` mocks for every endpoint
-  (success, error mapping, multipart attachment uploads)
+  (success, error mapping, retry/rate-limit handling, size limits,
+  multipart attachment uploads)
+- Markdown/ADF conversion round trips
 - Mode-gated tool registration (`readonly` excludes write tools)
+- HTTP bearer-token authentication
 - End-to-end smoke tests that spawn the real binary and drive it via the
   official SDK client over both stdio and HTTP transports
 

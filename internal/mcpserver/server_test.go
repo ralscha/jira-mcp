@@ -55,14 +55,25 @@ var readToolNames = []string{
 	"jira_list_projects",
 	"jira_get_project",
 	"jira_get_transitions",
+	"jira_get_comments",
+	"jira_get_myself",
+	"jira_search_users",
+	"jira_list_fields",
+	"jira_list_issue_types",
+	"jira_get_create_fields",
+	"jira_list_link_types",
+	"jira_get_worklogs",
 	"jira_download_attachment",
 }
 
 var writeToolNames = []string{
 	"jira_create_issue",
 	"jira_update_issue",
+	"jira_assign_issue",
 	"jira_transition_issue",
 	"jira_add_comment",
+	"jira_link_issues",
+	"jira_add_worklog",
 	"jira_upload_attachment",
 }
 
