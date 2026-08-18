@@ -63,7 +63,7 @@ Run `jira-mcp --version` to print the build version.
 | `jira_list_link_types`      | List the issue link types configured on the site           |
 | `jira_get_myself`           | Get the account this server authenticates as               |
 | `jira_search_users`         | Find users by display name or email, to get account ids    |
-| `jira_download_attachment`  | Download a Jira attachment's content (base64-encoded)      |
+| `jira_download_attachment`  | Download an attachment (native MCP image or base64 content) |
 
 Attachment ids come from the `attachments` list returned by `jira_get_issue`.
 

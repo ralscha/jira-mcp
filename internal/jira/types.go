@@ -1,5 +1,10 @@
 package jira
 
+import (
+	"encoding/json"
+	"fmt"
+)
+
 // User is a minimal Jira Cloud user reference (assignee, reporter, author).
 type User struct {
 	AccountID    string `json:"accountId,omitempty"`
@@ -164,4 +169,37 @@ type Attachment struct {
 	Content  string `json:"content"`
 	Created  string `json:"created,omitempty"`
 	Author   *User  `json:"author,omitempty"`
+}
+
+// UnmarshalJSON accepts both representations Jira uses for attachment IDs:
+// numbers in attachment metadata and strings in issue/upload responses.
+func (a *Attachment) UnmarshalJSON(data []byte) error {
+	type attachment Attachment
+	var decoded struct {
+		ID json.RawMessage `json:"id"`
+		*attachment
+	}
+
+	decoded.attachment = (*attachment)(a)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	if len(decoded.ID) == 0 || string(decoded.ID) == "null" {
+		a.ID = ""
+		return nil
+	}
+	if decoded.ID[0] == '"' {
+		if err := json.Unmarshal(decoded.ID, &a.ID); err != nil {
+			return fmt.Errorf("jira attachment id: %w", err)
+		}
+		return nil
+	}
+
+	var id json.Number
+	if err := json.Unmarshal(decoded.ID, &id); err != nil {
+		return fmt.Errorf("jira attachment id: %w", err)
+	}
+	a.ID = id.String()
+	return nil
 }

@@ -2,22 +2,21 @@ package jira
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"net/url"
 )
 
 // DownloadedAttachment holds the content and metadata of a fetched
-// attachment, with content base64-encoded for transport over MCP.
+// attachment. MCP handlers choose the appropriate wire representation.
 type DownloadedAttachment struct {
-	Filename   string
-	MimeType   string
-	Size       int64
-	DataBase64 string
+	Filename string
+	MimeType string
+	Size     int64
+	Data     []byte
 }
 
 // DownloadAttachment fetches an attachment's metadata and content by id,
-// returning the content base64-encoded. Attachments larger than
+// returning its raw content. Attachments larger than
 // MaxAttachmentBytes are rejected.
 func (c *Client) DownloadAttachment(ctx context.Context, id string) (*DownloadedAttachment, error) {
 	var meta Attachment
@@ -40,10 +39,10 @@ func (c *Client) DownloadAttachment(ctx context.Context, id string) (*Downloaded
 	}
 
 	return &DownloadedAttachment{
-		Filename:   meta.Filename,
-		MimeType:   mimeType,
-		Size:       meta.Size,
-		DataBase64: base64.StdEncoding.EncodeToString(data),
+		Filename: meta.Filename,
+		MimeType: mimeType,
+		Size:     meta.Size,
+		Data:     data,
 	}, nil
 }
 

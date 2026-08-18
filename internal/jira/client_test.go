@@ -306,7 +306,7 @@ func TestDownloadAndUploadAttachment(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/3/attachment/10001":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": "10001", "filename": "foo.txt", "mimeType": "text/plain",
+				"id": 10001, "filename": "foo.txt", "mimeType": "text/plain",
 				"size":    len(fileContent),
 				"content": "http://" + r.Host + "/rest/api/3/attachment/content/10001",
 			})
@@ -334,6 +334,9 @@ func TestDownloadAndUploadAttachment(t *testing.T) {
 	}
 	if downloaded.Filename != "foo.txt" {
 		t.Errorf("Filename = %q", downloaded.Filename)
+	}
+	if string(downloaded.Data) != fileContent {
+		t.Errorf("Data = %q", downloaded.Data)
 	}
 
 	uploaded, err := c.UploadAttachment(t.Context(), "PROJ-1", "bar.txt", "text/plain", []byte("data"))

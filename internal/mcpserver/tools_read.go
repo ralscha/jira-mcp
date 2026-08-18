@@ -5,7 +5,10 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"mime"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -647,7 +650,7 @@ type DownloadAttachmentOutput struct {
 	Filename   string `json:"filename" jsonschema:"the attachment's original filename"`
 	MimeType   string `json:"mime_type,omitempty" jsonschema:"the attachment's MIME type"`
 	Size       int64  `json:"size,omitempty" jsonschema:"the attachment size in bytes"`
-	DataBase64 string `json:"data_base64" jsonschema:"the attachment content, base64-encoded"`
+	DataBase64 string `json:"data_base64,omitempty" jsonschema:"the attachment content, base64-encoded; omitted when returned as MCP image content"`
 }
 
 func downloadAttachment(client *jira.Client) mcp.ToolHandlerFor[DownloadAttachmentInput, DownloadAttachmentOutput] {
@@ -656,12 +659,26 @@ func downloadAttachment(client *jira.Client) mcp.ToolHandlerFor[DownloadAttachme
 		if err != nil {
 			return nil, DownloadAttachmentOutput{}, fmt.Errorf("download attachment %s: %w", in.AttachmentID, err)
 		}
-		return nil, DownloadAttachmentOutput{
+
+		output := DownloadAttachmentOutput{
 			Filename:   attachment.Filename,
 			MimeType:   attachment.MimeType,
 			Size:       attachment.Size,
-			DataBase64: attachment.DataBase64,
-		}, nil
+			DataBase64: base64.StdEncoding.EncodeToString(attachment.Data),
+		}
+
+		var result *mcp.CallToolResult
+		mediaType, _, parseErr := mime.ParseMediaType(attachment.MimeType)
+		if parseErr == nil && strings.HasPrefix(mediaType, "image/") {
+			output.DataBase64 = ""
+			result = &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.ImageContent{Data: attachment.Data, MIMEType: mediaType},
+				},
+			}
+		}
+
+		return result, output, nil
 	}
 }
 
