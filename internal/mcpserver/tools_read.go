@@ -59,6 +59,7 @@ type IssueSummary struct {
 	DueDate           string              `json:"due_date,omitempty" jsonschema:"the due date, as YYYY-MM-DD"`
 	Created           string              `json:"created,omitempty" jsonschema:"creation timestamp"`
 	Updated           string              `json:"updated,omitempty" jsonschema:"last update timestamp"`
+	Fields            map[string]any      `json:"fields,omitempty" jsonschema:"requested custom or otherwise unmodeled Jira fields, keyed by field id"`
 }
 
 func namedRefNames(refs []jira.NamedRef) []string {
@@ -139,6 +140,7 @@ func issueToSummary(issue *jira.Issue) IssueSummary {
 		DueDate:     issue.Fields.DueDate,
 		Created:     issue.Fields.Created,
 		Updated:     issue.Fields.Updated,
+		Fields:      issue.Fields.Additional,
 	}
 	if issue.Fields.Status != nil {
 		s.Status = issue.Fields.Status.Name
@@ -246,8 +248,11 @@ type ListProjectsInput struct {
 
 // ListProjectsOutput is the output for the jira_list_projects tool.
 type ListProjectsOutput struct {
-	Total    int              `json:"total" jsonschema:"total number of matching projects"`
-	Projects []ProjectSummary `json:"projects" jsonschema:"the projects in this page"`
+	Total      int              `json:"total" jsonschema:"total number of matching projects"`
+	StartAt    int              `json:"start_at" jsonschema:"the offset of this page"`
+	MaxResults int              `json:"max_results" jsonschema:"the page size reported by Jira"`
+	IsLast     bool             `json:"is_last" jsonschema:"whether this is the final page"`
+	Projects   []ProjectSummary `json:"projects" jsonschema:"the projects in this page"`
 }
 
 func listProjects(client *jira.Client) mcp.ToolHandlerFor[ListProjectsInput, ListProjectsOutput] {
@@ -263,8 +268,11 @@ func listProjects(client *jira.Client) mcp.ToolHandlerFor[ListProjectsInput, Lis
 			return nil, ListProjectsOutput{}, fmt.Errorf("list projects: %w", err)
 		}
 		out := ListProjectsOutput{
-			Total:    result.Total,
-			Projects: make([]ProjectSummary, len(result.Values)),
+			Total:      result.Total,
+			StartAt:    result.StartAt,
+			MaxResults: result.MaxResults,
+			IsLast:     result.IsLast,
+			Projects:   make([]ProjectSummary, len(result.Values)),
 		}
 		for i := range result.Values {
 			out.Projects[i] = projectToSummary(&result.Values[i])

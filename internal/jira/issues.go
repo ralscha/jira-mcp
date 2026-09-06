@@ -19,7 +19,12 @@ var defaultSearchFields = []string{
 	"priority",
 	"resolution",
 	"labels",
+	"components",
+	"fixVersions",
 	"parent",
+	"subtasks",
+	"issuelinks",
+	"attachment",
 	"duedate",
 	"created",
 	"updated",
@@ -85,17 +90,21 @@ type CreateIssueInput struct {
 	Priority          string // priority name, e.g. "High"
 	Labels            []string
 	Components        []string // component names
+	FixVersions       []string // fix version names
 	DueDate           string   // YYYY-MM-DD
 	Fields            map[string]any
 }
 
 // CreateIssue creates a new issue and returns the created issue's key/id.
 func (c *Client) CreateIssue(ctx context.Context, in CreateIssueInput) (*Issue, error) {
-	fields := map[string]any{
-		"project":   map[string]any{"key": in.ProjectKey},
-		"issuetype": map[string]any{"name": in.IssueType},
-		"summary":   in.Summary,
+	fields := maps.Clone(in.Fields)
+	if fields == nil {
+		fields = make(map[string]any)
 	}
+	// Dedicated arguments take precedence over the raw fields escape hatch.
+	fields["project"] = map[string]any{"key": in.ProjectKey}
+	fields["issuetype"] = map[string]any{"name": in.IssueType}
+	fields["summary"] = in.Summary
 	if in.Description != "" {
 		fields["description"] = markdownToADF(in.Description)
 	}
@@ -114,10 +123,12 @@ func (c *Client) CreateIssue(ctx context.Context, in CreateIssueInput) (*Issue, 
 	if len(in.Components) > 0 {
 		fields["components"] = namedRefs(in.Components)
 	}
+	if len(in.FixVersions) > 0 {
+		fields["fixVersions"] = namedRefs(in.FixVersions)
+	}
 	if in.DueDate != "" {
 		fields["duedate"] = in.DueDate
 	}
-	maps.Copy(fields, in.Fields)
 	body := map[string]any{"fields": fields}
 
 	var created Issue
@@ -137,18 +148,26 @@ type UpdateIssueInput struct {
 	Priority          *string
 	Labels            *[]string
 	Components        *[]string
+	FixVersions       *[]string
 	DueDate           *string // YYYY-MM-DD; empty string clears the due date
 	Fields            map[string]any
 }
 
 // UpdateIssue updates the given fields on an existing issue.
 func (c *Client) UpdateIssue(ctx context.Context, keyOrID string, in UpdateIssueInput) error {
-	fields := map[string]any{}
+	fields := maps.Clone(in.Fields)
+	if fields == nil {
+		fields = make(map[string]any)
+	}
 	if in.Summary != nil {
 		fields["summary"] = *in.Summary
 	}
 	if in.Description != nil {
-		fields["description"] = markdownToADF(*in.Description)
+		if *in.Description == "" {
+			fields["description"] = nil
+		} else {
+			fields["description"] = markdownToADF(*in.Description)
+		}
 	}
 	if in.AssigneeAccountID != nil {
 		if *in.AssigneeAccountID == "" {
@@ -170,6 +189,9 @@ func (c *Client) UpdateIssue(ctx context.Context, keyOrID string, in UpdateIssue
 	if in.Components != nil {
 		fields["components"] = namedRefs(*in.Components)
 	}
+	if in.FixVersions != nil {
+		fields["fixVersions"] = namedRefs(*in.FixVersions)
+	}
 	if in.DueDate != nil {
 		if *in.DueDate == "" {
 			fields["duedate"] = nil
@@ -177,7 +199,6 @@ func (c *Client) UpdateIssue(ctx context.Context, keyOrID string, in UpdateIssue
 			fields["duedate"] = *in.DueDate
 		}
 	}
-	maps.Copy(fields, in.Fields)
 	if len(fields) == 0 {
 		return fmt.Errorf("jira: UpdateIssue requires at least one field to update")
 	}

@@ -113,6 +113,40 @@ func TestLoad_InvalidBaseURL(t *testing.T) {
 	}
 }
 
+func TestLoad_RejectsBaseURLWithCredentialsOrQuery(t *testing.T) {
+	for _, baseURL := range []string{
+		"https://user:password@example.atlassian.net",
+		"https://example.atlassian.net?token=secret",
+		"https://example.atlassian.net#fragment",
+	} {
+		t.Run(baseURL, func(t *testing.T) {
+			t.Setenv("JIRA_BASE_URL", baseURL)
+			t.Setenv("JIRA_EMAIL", "user@example.com")
+			t.Setenv("JIRA_API_TOKEN", "tok123")
+			t.Setenv("JIRA_MODE", "")
+			t.Setenv("MCP_TRANSPORT", "")
+			t.Setenv("MCP_HTTP_ADDR", "")
+
+			if _, err := Load(nil); err == nil {
+				t.Fatal("Load() error = nil, want invalid base URL error")
+			}
+		})
+	}
+}
+
+func TestLoad_HTTPRequiresAddress(t *testing.T) {
+	t.Setenv("JIRA_BASE_URL", "https://example.atlassian.net")
+	t.Setenv("JIRA_EMAIL", "user@example.com")
+	t.Setenv("JIRA_API_TOKEN", "tok123")
+	t.Setenv("JIRA_MODE", "")
+	t.Setenv("MCP_TRANSPORT", "http")
+	t.Setenv("MCP_HTTP_ADDR", "")
+
+	if _, err := Load([]string{"--http-addr="}); err == nil {
+		t.Fatal("Load() error = nil, want missing HTTP address error")
+	}
+}
+
 func TestLoad_InvalidMode(t *testing.T) {
 	t.Setenv("JIRA_BASE_URL", "https://example.atlassian.net")
 	t.Setenv("JIRA_EMAIL", "user@example.com")

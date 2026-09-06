@@ -78,7 +78,7 @@ func TestSearchIssues(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected fields array, got %T", body["fields"])
 		}
-		wantFields := []string{"summary", "status", "issuetype", "project", "assignee", "reporter", "description", "priority", "resolution", "labels", "parent", "duedate", "created", "updated"}
+		wantFields := []string{"summary", "status", "issuetype", "project", "assignee", "reporter", "description", "priority", "resolution", "labels", "components", "fixVersions", "parent", "subtasks", "issuelinks", "attachment", "duedate", "created", "updated"}
 		gotFields := make([]string, len(fields))
 		for i, field := range fields {
 			gotFields[i], ok = field.(string)
@@ -148,6 +148,10 @@ func TestCreateIssue(t *testing.T) {
 		if fields["summary"] != "New issue" {
 			t.Fatalf("unexpected fields: %v", fields)
 		}
+		fixVersions, ok := fields["fixVersions"].([]any)
+		if !ok || len(fixVersions) != 1 || fixVersions[0].(map[string]any)["name"] != "1.2.3" {
+			t.Fatalf("unexpected fixVersions: %v", fields["fixVersions"])
+		}
 		if _, ok := fields["description"]; !ok {
 			t.Fatalf("expected description to be set")
 		}
@@ -160,6 +164,8 @@ func TestCreateIssue(t *testing.T) {
 		IssueType:   "Task",
 		Summary:     "New issue",
 		Description: "some details",
+		FixVersions: []string{"1.2.3"},
+		Fields:      map[string]any{"summary": "raw value must not win"},
 	})
 	if err != nil {
 		t.Fatalf("CreateIssue() error = %v", err)
@@ -184,12 +190,73 @@ func TestUpdateIssue(t *testing.T) {
 		if r.Method != http.MethodPut || r.URL.Path != "/rest/api/3/issue/PROJ-1" {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		fields := body["fields"].(map[string]any)
+		if fields["summary"] != "Updated summary" {
+			t.Fatalf("dedicated summary did not take precedence: %v", fields)
+		}
+		if description, ok := fields["description"]; !ok || description != nil {
+			t.Fatalf("empty description should clear the field: %v", fields)
+		}
+		fixVersions, ok := fields["fixVersions"].([]any)
+		if !ok || len(fixVersions) != 1 || fixVersions[0].(map[string]any)["name"] != "2.0" {
+			t.Fatalf("unexpected fixVersions: %v", fields["fixVersions"])
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 	summary := "Updated summary"
-	err := c.UpdateIssue(t.Context(), "PROJ-1", UpdateIssueInput{Summary: &summary})
+	description := ""
+	fixVersions := []string{"2.0"}
+	err := c.UpdateIssue(t.Context(), "PROJ-1", UpdateIssueInput{
+		Summary:     &summary,
+		Description: &description,
+		FixVersions: &fixVersions,
+		Fields:      map[string]any{"summary": "raw value must not win"},
+	})
 	if err != nil {
 		t.Fatalf("UpdateIssue() error = %v", err)
+	}
+}
+
+func TestClient_ResolvesAPIPathsBelowBasePath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ex/jira/cloud-id/rest/api/3/issue/PROJ-1" {
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"key": "PROJ-1"})
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewClient(server.URL+"/ex/jira/cloud-id", "user@example.com", "tok", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	if _, err := client.GetIssue(t.Context(), "PROJ-1", nil); err != nil {
+		t.Fatalf("GetIssue() error = %v", err)
+	}
+}
+
+func TestClient_RejectsDifferentURLOrigin(t *testing.T) {
+	client, err := NewClient("https://example.atlassian.net", "user@example.com", "tok", nil)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	for _, ref := range []string{
+		"http://example.atlassian.net/attachment/1",
+		"https://other.atlassian.net/attachment/1",
+	} {
+		if _, err := client.resolveURL(ref); err == nil {
+			t.Errorf("resolveURL(%q) error = nil, want origin mismatch", ref)
+		}
+	}
+
+	gatewayClient, err := NewClient("https://api.atlassian.com/ex/jira/cloud-id", "user@example.com", "tok", nil)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	if _, err := gatewayClient.resolveURL("https://api.atlassian.com/ex/jira/other-cloud/attachment/1"); err == nil {
+		t.Error("resolveURL() error = nil, want base path mismatch")
 	}
 }
 

@@ -24,6 +24,7 @@ type CreateIssueInput struct {
 	Priority          string         `json:"priority,omitempty" jsonschema:"the priority name, e.g. High"`
 	Labels            []string       `json:"labels,omitempty" jsonschema:"labels to set on the issue"`
 	Components        []string       `json:"components,omitempty" jsonschema:"names of components to set on the issue"`
+	FixVersions       []string       `json:"fix_versions,omitempty" jsonschema:"names of fix versions to set on the issue"`
 	DueDate           string         `json:"due_date,omitempty" jsonschema:"the due date, as YYYY-MM-DD"`
 	Fields            map[string]any `json:"fields,omitempty" jsonschema:"raw Jira fields to set, keyed by field id, e.g. {\"customfield_10011\": \"value\"}; use jira_list_fields to find ids"`
 }
@@ -45,6 +46,7 @@ func createIssue(client *jira.Client) mcp.ToolHandlerFor[CreateIssueInput, Creat
 			Priority:          in.Priority,
 			Labels:            in.Labels,
 			Components:        in.Components,
+			FixVersions:       in.FixVersions,
 			DueDate:           in.DueDate,
 			Fields:            in.Fields,
 		})
@@ -61,11 +63,12 @@ func createIssue(client *jira.Client) mcp.ToolHandlerFor[CreateIssueInput, Creat
 type UpdateIssueInput struct {
 	IssueKey          string         `json:"issue_key" jsonschema:"the Jira issue key or id to update, e.g. PROJ-123"`
 	Summary           *string        `json:"summary,omitempty" jsonschema:"new summary/title for the issue"`
-	Description       *string        `json:"description,omitempty" jsonschema:"new description for the issue; Markdown is converted to Jira rich text"`
+	Description       *string        `json:"description,omitempty" jsonschema:"new description for the issue; Markdown is converted to Jira rich text; pass an empty string to clear it"`
 	AssigneeAccountID *string        `json:"assignee_account_id,omitempty" jsonschema:"account id of the new assignee; pass an empty string to unassign"`
 	Priority          *string        `json:"priority,omitempty" jsonschema:"new priority name, e.g. High"`
 	Labels            *[]string      `json:"labels,omitempty" jsonschema:"replaces the issue's labels with this list"`
 	Components        *[]string      `json:"components,omitempty" jsonschema:"replaces the issue's components with these component names"`
+	FixVersions       *[]string      `json:"fix_versions,omitempty" jsonschema:"replaces the issue's fix versions with these version names"`
 	DueDate           *string        `json:"due_date,omitempty" jsonschema:"new due date as YYYY-MM-DD; pass an empty string to clear it"`
 	Fields            map[string]any `json:"fields,omitempty" jsonschema:"raw Jira fields to set, keyed by field id, e.g. {\"customfield_10011\": \"value\"}; use jira_list_fields to find ids"`
 }
@@ -85,6 +88,7 @@ func updateIssue(client *jira.Client) mcp.ToolHandlerFor[UpdateIssueInput, Updat
 			Priority:          in.Priority,
 			Labels:            in.Labels,
 			Components:        in.Components,
+			FixVersions:       in.FixVersions,
 			DueDate:           in.DueDate,
 			Fields:            in.Fields,
 		})
@@ -259,7 +263,7 @@ func registerWriteTools(s *mcp.Server, client *jira.Client) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "jira_update_issue",
-		Description: "Update fields of an existing Jira issue, such as summary, description, assignee, priority, labels, components or due date.",
+		Description: "Update fields of an existing Jira issue, such as summary, description, assignee, priority, labels, components, fix versions or due date.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(false), IdempotentHint: true},
 	}, updateIssue(client))
 

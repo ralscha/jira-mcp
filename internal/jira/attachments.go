@@ -27,6 +27,9 @@ func (c *Client) DownloadAttachment(ctx context.Context, id string) (*Downloaded
 	if meta.Size > MaxAttachmentBytes {
 		return nil, fmt.Errorf("%w: attachment %s is %d bytes, limit is %d", ErrTooLarge, id, meta.Size, int64(MaxAttachmentBytes))
 	}
+	if meta.Content == "" {
+		return nil, fmt.Errorf("jira: attachment %s has no content URL", id)
+	}
 
 	data, contentType, err := c.doRaw(ctx, meta.Content, MaxAttachmentBytes)
 	if err != nil {
@@ -41,7 +44,7 @@ func (c *Client) DownloadAttachment(ctx context.Context, id string) (*Downloaded
 	return &DownloadedAttachment{
 		Filename: meta.Filename,
 		MimeType: mimeType,
-		Size:     meta.Size,
+		Size:     int64(len(data)),
 		Data:     data,
 	}, nil
 }

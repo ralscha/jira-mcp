@@ -94,6 +94,51 @@ type IssueFields struct {
 	DueDate     string        `json:"duedate,omitempty"`
 	Created     string        `json:"created,omitempty"`
 	Updated     string        `json:"updated,omitempty"`
+	// Additional contains fields returned by Jira that do not have a
+	// dedicated property above, including requested custom fields.
+	Additional map[string]any `json:"-"`
+}
+
+// UnmarshalJSON retains custom and otherwise unknown fields instead of
+// silently discarding them. This makes the fields option on get/search useful
+// for Jira instances with custom schemas.
+func (f *IssueFields) UnmarshalJSON(data []byte) error {
+	type issueFields IssueFields
+	var decoded issueFields
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*f = IssueFields(decoded)
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for key, value := range raw {
+		if isKnownIssueField(key) {
+			continue
+		}
+		var additional any
+		if err := json.Unmarshal(value, &additional); err != nil {
+			return fmt.Errorf("jira issue field %s: %w", key, err)
+		}
+		if f.Additional == nil {
+			f.Additional = make(map[string]any)
+		}
+		f.Additional[key] = additional
+	}
+	return nil
+}
+
+func isKnownIssueField(field string) bool {
+	switch field {
+	case "summary", "description", "status", "issuetype", "project", "assignee", "reporter",
+		"priority", "resolution", "labels", "components", "fixVersions", "parent", "subtasks",
+		"issuelinks", "attachment", "duedate", "created", "updated":
+		return true
+	default:
+		return false
+	}
 }
 
 // Issue is a Jira issue as returned by the get/search/create endpoints.

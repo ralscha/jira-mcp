@@ -36,7 +36,7 @@ func TestADFRoundTrip(t *testing.T) {
 	}{
 		{name: "soft line breaks", text: "first line\nsecond line"},
 		{name: "paragraphs", text: "first paragraph\n\nsecond paragraph"},
-		{name: "heading", text: "# Title\n\nbody text"},
+		{name: "heading", text: "### Title\n\nbody text"},
 		{name: "bullet list", text: "- one\n- two\n- three"},
 		{name: "ordered list", text: "1. one\n2. two"},
 		{name: "code block", text: "```go\nfmt.Println(\"hi\")\n```"},
@@ -72,6 +72,23 @@ func TestMarkdownToADF_RejectsUnsafeLinkScheme(t *testing.T) {
 				t.Fatalf("unsafe link should not produce a link mark: %#v", m)
 			}
 		}
+	}
+}
+
+func TestAdfToMarkdown_RejectsUnsafeLinkScheme(t *testing.T) {
+	doc := map[string]any{
+		"type": "doc",
+		"content": []any{map[string]any{
+			"type": "paragraph",
+			"content": []any{map[string]any{
+				"type":  "text",
+				"text":  "click",
+				"marks": []any{map[string]any{"type": "link", "attrs": map[string]any{"href": "javascript:alert(1)"}}},
+			}},
+		}},
+	}
+	if got := adfToMarkdown(doc); got != "click" {
+		t.Errorf("adfToMarkdown() = %q, want plain text", got)
 	}
 }
 

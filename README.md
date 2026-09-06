@@ -72,7 +72,7 @@ Attachment ids come from the `attachments` list returned by `jira_get_issue`.
 | Tool                     | Description                                    |
 | ------------------------ | ---------------------------------------------- |
 | `jira_create_issue`      | Create a new Jira issue                        |
-| `jira_update_issue`      | Update summary, description, assignee, priority, labels, components, due date or raw fields |
+| `jira_update_issue`      | Update summary, description, assignee, priority, labels, components, fix versions, due date or raw fields |
 | `jira_assign_issue`      | Assign or unassign an issue                    |
 | `jira_transition_issue`  | Execute a workflow transition, optionally setting a resolution and comment |
 | `jira_add_comment`       | Add a comment to an issue                      |
@@ -89,6 +89,10 @@ The default mode is `readonly`. Set `JIRA_MODE=readwrite` (or
 `fields` object of raw Jira field values keyed by field id, for anything not
 covered by a dedicated argument. Use `jira_list_fields` or
 `jira_get_create_fields` to discover ids such as `customfield_10011`.
+
+`jira_get_issue` and `jira_search_issues` accept a `fields` list. Requested
+custom or otherwise unmodeled values are returned in the output's `fields`
+object. Standard fields continue to use the output's dedicated properties.
 
 ### Rich text
 
@@ -130,10 +134,11 @@ jira-mcp --transport=http --http-addr=:8080
 
 Set `MCP_AUTH_TOKEN` (or `--auth-token`) to require clients to send
 `Authorization: Bearer <token>`; requests without a matching token get a
-`401`. Without it the endpoint has **no authentication**, so in `readwrite`
-mode you must secure it at the network or deployment layer (reverse proxy,
-firewall, loopback-only binding) to prevent unauthorized issue modifications.
-The server logs a warning at startup in that configuration.
+`401`. Without it the endpoint has **no authentication**, so you must secure it
+at the network or deployment layer (reverse proxy, firewall, or loopback-only
+binding) to prevent unauthorized Jira access. This is especially important in
+`readwrite` mode, where clients can modify issues. The server logs a warning at
+startup whenever HTTP authentication is disabled.
 
 ## Authentication
 
@@ -211,7 +216,7 @@ Add to `.vscode/mcp.json` (or your user-level `mcp.json`):
 
 ### Requirements
 
-- Go 1.26+
+- Go 1.27.1+
 
 ### Build
 

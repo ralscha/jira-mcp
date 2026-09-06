@@ -68,8 +68,12 @@ func runHTTP(ctx context.Context, cfg *config.Config, server *mcp.Server) error 
 
 	if cfg.AuthToken != "" {
 		handler = requireBearerToken(cfg.AuthToken, handler)
-	} else if cfg.IsReadWrite() {
-		log.Print("jira-mcp: warning: HTTP transport in readwrite mode without --auth-token; anyone who can reach this address can modify Jira issues")
+	} else {
+		access := "read Jira data"
+		if cfg.IsReadWrite() {
+			access = "read Jira data and modify issues"
+		}
+		log.Printf("jira-mcp: warning: HTTP transport without --auth-token; anyone who can reach this address can %s", access)
 	}
 
 	httpServer := &http.Server{

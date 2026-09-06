@@ -2,6 +2,7 @@ package jira
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -51,20 +52,26 @@ type CreateMetaIssueType struct {
 }
 
 type createMetaIssueTypesResult struct {
+	StartAt    int                   `json:"startAt"`
+	Total      int                   `json:"total"`
 	IssueTypes []CreateMetaIssueType `json:"issueTypes"`
 }
 
 // ListCreateIssueTypes returns the issue types that can be created in a
 // project.
 func (c *Client) ListCreateIssueTypes(ctx context.Context, projectKeyOrID string) ([]CreateMetaIssueType, error) {
-	var result createMetaIssueTypesResult
 	path := "rest/api/3/issue/createmeta/" + url.PathEscape(projectKeyOrID) + "/issuetypes"
-	query := url.Values{}
-	query.Set("maxResults", strconv.Itoa(200))
-	if err := c.doJSON(ctx, "GET", path, query, nil, &result); err != nil {
-		return nil, err
-	}
-	return result.IssueTypes, nil
+	return collectCreateMetaPages("issue type", func(startAt int) (int, int, []CreateMetaIssueType, error) {
+		query := url.Values{}
+		query.Set("startAt", strconv.Itoa(startAt))
+		query.Set("maxResults", strconv.Itoa(200))
+
+		var page createMetaIssueTypesResult
+		if err := c.doJSON(ctx, "GET", path, query, nil, &page); err != nil {
+			return 0, 0, nil, err
+		}
+		return page.StartAt, page.Total, page.IssueTypes, nil
+	})
 }
 
 // CreateMetaField describes a field on the create screen for a given
@@ -82,7 +89,9 @@ type CreateMetaField struct {
 }
 
 type createMetaFieldsResult struct {
-	Fields []CreateMetaField `json:"fields"`
+	StartAt int               `json:"startAt"`
+	Total   int               `json:"total"`
+	Fields  []CreateMetaField `json:"fields"`
 }
 
 // ListCreateFields returns the fields available on the create screen for a
@@ -94,15 +103,38 @@ func (c *Client) ListCreateFields(ctx context.Context, projectKeyOrID, issueType
 		return nil, err
 	}
 
-	var result createMetaFieldsResult
 	path := "rest/api/3/issue/createmeta/" + url.PathEscape(projectKeyOrID) +
 		"/issuetypes/" + url.PathEscape(issueTypeID)
-	query := url.Values{}
-	query.Set("maxResults", strconv.Itoa(200))
-	if err := c.doJSON(ctx, "GET", path, query, nil, &result); err != nil {
-		return nil, err
+	return collectCreateMetaPages("field", func(startAt int) (int, int, []CreateMetaField, error) {
+		query := url.Values{}
+		query.Set("startAt", strconv.Itoa(startAt))
+		query.Set("maxResults", strconv.Itoa(200))
+
+		var page createMetaFieldsResult
+		if err := c.doJSON(ctx, "GET", path, query, nil, &page); err != nil {
+			return 0, 0, nil, err
+		}
+		return page.StartAt, page.Total, page.Fields, nil
+	})
+}
+
+func collectCreateMetaPages[T any](kind string, fetch func(int) (int, int, []T, error)) ([]T, error) {
+	var all []T
+	for startAt := 0; ; {
+		pageStart, total, values, err := fetch(startAt)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, values...)
+		next := pageStart + len(values)
+		if len(values) == 0 || next >= total {
+			return all, nil
+		}
+		if next <= startAt {
+			return nil, fmt.Errorf("jira: create %s pagination did not advance", kind)
+		}
+		startAt = next
 	}
-	return result.Fields, nil
 }
 
 func (c *Client) resolveIssueTypeID(ctx context.Context, projectKeyOrID, issueTypeIDOrName string) (string, error) {

@@ -94,6 +94,18 @@ func TestDownloadAttachment_RejectsOversizedAttachment(t *testing.T) {
 	}
 }
 
+func TestDownloadAttachment_RejectsMissingContentURL(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "1", "filename": "missing.txt", "size": 1,
+		})
+	})
+
+	if _, err := c.DownloadAttachment(t.Context(), "1"); err == nil {
+		t.Fatal("DownloadAttachment() error = nil, want missing content URL error")
+	}
+}
+
 func TestUploadAttachment_RejectsOversizedData(t *testing.T) {
 	c := newTestClient(t, func(_ http.ResponseWriter, _ *http.Request) {
 		t.Fatal("upload should be rejected before any request is sent")

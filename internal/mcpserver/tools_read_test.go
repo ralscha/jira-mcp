@@ -65,3 +65,16 @@ func TestDownloadAttachmentReturnsNativeImageContent(t *testing.T) {
 		t.Errorf("image data = %q", image.Data)
 	}
 }
+
+func TestIssueToSummaryIncludesAdditionalFields(t *testing.T) {
+	issue := &jira.Issue{
+		Key: "PROJ-1",
+		Fields: jira.IssueFields{
+			Additional: map[string]any{"customfield_10011": "customer-facing"},
+		},
+	}
+	summary := issueToSummary(issue)
+	if summary.Fields["customfield_10011"] != "customer-facing" {
+		t.Fatalf("summary fields = %v", summary.Fields)
+	}
+}

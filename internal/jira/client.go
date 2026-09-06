@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -54,6 +55,15 @@ func NewClient(baseURL, email, token string, httpClient *http.Client) (*Client, 
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("jira: invalid base URL: %w", err)
+	}
+	if !u.IsAbs() || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, errors.New("jira: base URL must be absolute and must not contain user information, a query, or a fragment")
+	}
+	// Resolve API paths beneath the complete configured path. Without a
+	// trailing slash, url.ResolveReference treats the final path segment as a
+	// file and drops it, which breaks scoped gateway URLs ending in a cloud id.
+	if !strings.HasSuffix(u.Path, "/") {
+		u.Path += "/"
 	}
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -232,7 +242,10 @@ func (c *Client) doMultipart(ctx context.Context, path, filename, mimeType strin
 	writer := multipart.NewWriter(&buf)
 
 	partHeader := textproto.MIMEHeader{}
-	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filename))
+	partHeader.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{
+		"name":     "file",
+		"filename": filename,
+	}))
 	if mimeType != "" {
 		partHeader.Set("Content-Type", mimeType)
 	}
@@ -299,12 +312,22 @@ func (c *Client) resolveURL(ref string) (*url.URL, error) {
 		return nil, fmt.Errorf("jira: invalid URL %q: %w", ref, err)
 	}
 	if parsed.IsAbs() {
-		if parsed.Host != c.baseURL.Host {
-			return nil, fmt.Errorf("jira: refusing to request %q: host does not match configured Jira base URL", ref)
+		if parsed.User != nil || !strings.EqualFold(parsed.Scheme, c.baseURL.Scheme) ||
+			!strings.EqualFold(parsed.Host, c.baseURL.Host) {
+			return nil, fmt.Errorf("jira: refusing to request %q: origin does not match configured Jira base URL", ref)
+		}
+		if basePath := c.baseURL.EscapedPath(); basePath != "/" &&
+			!strings.HasPrefix(parsed.EscapedPath(), basePath) {
+			return nil, fmt.Errorf("jira: refusing to request %q: path is outside configured Jira base URL", ref)
 		}
 		return parsed, nil
 	}
-	return c.baseURL.ResolveReference(&url.URL{Path: strings.TrimPrefix(ref, "/")}), nil
+	if parsed.Host != "" {
+		return nil, fmt.Errorf("jira: refusing to request %q: URL has an unexpected host", ref)
+	}
+	parsed.Path = strings.TrimPrefix(parsed.Path, "/")
+	parsed.RawPath = strings.TrimPrefix(parsed.RawPath, "/")
+	return c.baseURL.ResolveReference(parsed), nil
 }
 
 func parseAPIError(statusCode int, body []byte) *APIError {

@@ -120,6 +120,8 @@ func (c *Config) validate() error {
 		errs = append(errs, fmt.Sprintf("JIRA_BASE_URL is not a valid URL: %v", err))
 	} else if u.Scheme != "https" || u.Host == "" {
 		errs = append(errs, "JIRA_BASE_URL must be an absolute https URL")
+	} else if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		errs = append(errs, "JIRA_BASE_URL must not contain user information, a query, or a fragment")
 	}
 
 	if c.JiraEmail == "" {
@@ -139,6 +141,9 @@ func (c *Config) validate() error {
 	case TransportStdio, TransportHTTP:
 	default:
 		errs = append(errs, fmt.Sprintf("invalid transport %q: must be %q or %q", c.Transport, TransportStdio, TransportHTTP))
+	}
+	if c.Transport == TransportHTTP && c.HTTPAddr == "" {
+		errs = append(errs, "MCP_HTTP_ADDR (or --http-addr) is required for the HTTP transport")
 	}
 
 	if len(errs) > 0 {

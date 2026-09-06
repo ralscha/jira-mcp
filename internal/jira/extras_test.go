@@ -154,6 +154,7 @@ func TestGetIssue_ParsesRichFields(t *testing.T) {
 					"type":         map[string]any{"name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
 					"outwardIssue": map[string]any{"key": "PROJ-3", "fields": map[string]any{"summary": "Other"}},
 				}},
+				"customfield_10011": map[string]any{"value": "Customer-facing"},
 			},
 		})
 	})
@@ -186,5 +187,59 @@ func TestGetIssue_ParsesRichFields(t *testing.T) {
 	}
 	if len(f.IssueLinks) != 1 || f.IssueLinks[0].OutwardIssue == nil || f.IssueLinks[0].OutwardIssue.Key != "PROJ-3" {
 		t.Errorf("issuelinks = %+v", f.IssueLinks)
+	}
+	custom, ok := f.Additional["customfield_10011"].(map[string]any)
+	if !ok || custom["value"] != "Customer-facing" {
+		t.Errorf("additional fields = %+v", f.Additional)
+	}
+}
+
+func TestListCreateMetadata_FollowsPagination(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		startAt := r.URL.Query().Get("startAt")
+		switch r.URL.Path {
+		case "/rest/api/3/issue/createmeta/PROJ/issuetypes":
+			if startAt == "0" {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"startAt": 0, "total": 2,
+					"issueTypes": []map[string]any{{"id": "1", "name": "Task"}},
+				})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"startAt": 1, "total": 2,
+				"issueTypes": []map[string]any{{"id": "2", "name": "Bug"}},
+			})
+		case "/rest/api/3/issue/createmeta/PROJ/issuetypes/1":
+			if startAt == "0" {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"startAt": 0, "total": 2,
+					"fields": []map[string]any{{"fieldId": "summary", "name": "Summary"}},
+				})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"startAt": 1, "total": 2,
+				"fields": []map[string]any{{"fieldId": "description", "name": "Description"}},
+			})
+		default:
+			t.Fatalf("unexpected request: %s", r.URL.String())
+		}
+	})
+
+	issueTypes, err := c.ListCreateIssueTypes(t.Context(), "PROJ")
+	if err != nil {
+		t.Fatalf("ListCreateIssueTypes() error = %v", err)
+	}
+	if len(issueTypes) != 2 || issueTypes[1].Name != "Bug" {
+		t.Fatalf("ListCreateIssueTypes() = %+v", issueTypes)
+	}
+
+	fields, err := c.ListCreateFields(t.Context(), "PROJ", "1")
+	if err != nil {
+		t.Fatalf("ListCreateFields() error = %v", err)
+	}
+	if len(fields) != 2 || fields[1].FieldID != "description" {
+		t.Fatalf("ListCreateFields() = %+v", fields)
 	}
 }

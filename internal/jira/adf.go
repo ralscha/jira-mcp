@@ -1,6 +1,7 @@
 package jira
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -311,10 +312,18 @@ func parseInlineLink(s string) (label, href string, size int, ok bool) {
 }
 
 func isSafeLinkHref(href string) bool {
-	lower := strings.ToLower(href)
-	return strings.HasPrefix(lower, "http://") ||
-		strings.HasPrefix(lower, "https://") ||
-		strings.HasPrefix(lower, "mailto:")
+	u, err := url.Parse(href)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		return u.Host != ""
+	case "mailto":
+		return u.Opaque != ""
+	default:
+		return false
+	}
 }
 
 // adfToMarkdown renders an ADF document (as decoded from JSON, i.e. built
@@ -366,8 +375,8 @@ func renderBlock(sb *strings.Builder, node any, indent string) {
 
 	case "heading":
 		level := 1
-		if l, ok := nodeAttrs(m)["level"].(float64); ok && l >= 1 && l <= 6 {
-			level = int(l)
+		if l, ok := attrInt(m, "level"); ok && l >= 1 && l <= 6 {
+			level = l
 		}
 		writeLines(sb, indent, strings.Repeat("#", level)+" "+inlineText(m))
 
@@ -396,6 +405,17 @@ func renderBlock(sb *strings.Builder, node any, indent string) {
 
 	default:
 		renderBlocks(sb, childNodes(m), indent)
+	}
+}
+
+func attrInt(m map[string]any, key string) (int, bool) {
+	switch value := nodeAttrs(m)[key].(type) {
+	case int:
+		return value, true
+	case float64:
+		return int(value), value == float64(int(value))
+	default:
+		return 0, false
 	}
 }
 
@@ -518,7 +538,7 @@ func applyMarks(text string, marks any) string {
 		case "strike":
 			text = "~~" + text + "~~"
 		case "link":
-			if href := attrString(m, "href"); href != "" && href != text {
+			if href := attrString(m, "href"); href != text && isSafeLinkHref(href) {
 				text = "[" + text + "](" + href + ")"
 			}
 		}
